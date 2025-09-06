@@ -1,74 +1,73 @@
 import asyncio
-from playwright.async_api import async_playwright, TimeoutError
+from curlwright import RequestExecutor
+from playwright.async_api import TimeoutError
 
 async def main():
-    async with async_playwright() as p:
-        # 启动浏览器，添加--no-sandbox参数以增强在GitHub Actions等容器环境中的兼容性
-        browser = await p.chromium.launch(headless=True, args=['--no-sandbox'])
-        # 创建一个带有真实浏览器User-Agent的上下文，降低被识别为机器人的概率
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
-        )
-        page = await context.new_page()
+    """
+    使用 Curlwright 来处理 Cloudflare 验证并执行登录操作。
+    """
+    # 1. 初始化 Curlwright 的 RequestExecutor
+    # 它将管理 Playwright 浏览器实例并自动处理 Cloudflare。
+    # headless=True 使其在 GitHub Actions 等无UI环境中运行。
+    executor = RequestExecutor(headless=True)
+    
+    # 定义一个变量以持有 Playwright 的 page 对象
+    page = None
 
-        try:
-            print("1. 正在导航至登录页面...")
-            # 使用 'domcontentloaded' 可以更快地开始页面交互
-            await page.goto("https://clientarea.space-hosting.net/login", timeout=60000, wait_until="domcontentloaded")
+    try:
+        print("使用 Curlwright 导航至登录页面并尝试绕过 Cloudflare...")
+        
+        # 2. 使用 Curlwright 执行一个简单的 GET 请求
+        # 这个命令会导航到目标 URL，Curlwright 将在后台自动处理 Cloudflare 质询页面。
+        login_url = "https://clientarea.space-hosting.net/login"
+        await executor.execute(f'curl "{login_url}"')
 
-            # --- 参考 DrissionPage 逻辑优化 Cloudflare 验证处理 ---
-            print("2. 正在检查 Cloudflare 人机验证...")
-            try:
-                # 等待Cloudflare的iframe出现。这是最关键和最可靠的一步，类似DrissionPage中的iframe查找逻辑。
-                challenge_frame_locator = page.frame_locator('iframe[src*="challenges.cloudflare.com"]')
-                
-                # 在iframe内部，定位并点击复选框。
-                checkbox = challenge_frame_locator.locator('input[type="checkbox"]')
-                await checkbox.wait_for(state="visible", timeout=20000) # 等待复选框可见
-                
-                print("   检测到Cloudflare验证，正在点击...")
-                await checkbox.click()
+        # 3. 从执行器中获取 page 对象
+        # 当 execute 命令完成后，浏览器页面已经准备好进行后续交互了。
+        page = executor.browser_manager.page
+        print("Cloudflare 验证已处理，成功加载登录页面。")
 
-                # 关键步骤：确认验证成功。我们不等待元素消失，而是等待下一个页面的关键元素（用户名字段）出现。
-                # 这是一种更可靠的确认方式，确保我们成功进入了登录页。
-                print("   Cloudflare验证已点击，等待登录页面加载...")
-                await page.locator('input[name="username"]').wait_for(state="visible", timeout=30000)
-                print("   Cloudflare验证通过，登录页面已成功加载。")
+        # --- 从这里开始，我们已经位于真实的登录页面，可以执行之前的操作 ---
 
-            except TimeoutError:
-                # 如果在指定时间内没有找到Cloudflare验证框，脚本会假定页面已是登录页。
-                print("   未检测到Cloudflare验证，或已直接进入登录页，继续执行。")
-            
-            print("3. 正在填写登录信息...")
-            await page.fill('input[name="username"]', "bryantava2@hotmail.com")
-            await page.fill('input[name="password"]', ";Vud)pH!kXvU")
-            
-            print("4. 正在处理 reCAPTCHA 验证...")
-            # reCAPTCHA同样在iframe中
-            recaptcha_frame = page.frame_locator('iframe[title="reCAPTCHA"]')
-            await recaptcha_frame.locator('div.recaptcha-checkbox-border').click()
+        print("等待用户名字段出现并填写登录信息...")
+        # 等待关键元素加载完成，确保页面正确
+        await page.locator('input[name="username"]').wait_for(state="visible", timeout=30000)
+        
+        # 填写电子邮件
+        await page.fill('input[name="username"]', "bryantava2@hotmail.com")
+        
+        # 填写密码
+        await page.fill('input[name="password"]', ";Vud)pH!kXvU")
+        
+        print("正在处理 reCAPTCHA...")
+        # reCAPTCHA 位于一个 iframe 中
+        recaptcha_frame = page.frame_locator('iframe[title="reCAPTCHA"]')
+        await recaptcha_frame.locator('div.recaptcha-checkbox-border').click()
 
-            # 等待reCAPTCHA处理（自动化脚本通常无法完全通过reCAPTCHA，但点击是必须的步骤）
-            await page.wait_for_timeout(3000)
+        # 短暂等待 reCAPTCHA 的响应
+        await page.wait_for_timeout(5000)
 
-            print("5. 正在点击登录按钮...")
-            await page.click('button#login')
+        print("正在点击登录按钮...")
+        await page.click('button#login')
 
-            # 6. 验证登录是否成功
-            print("6. 正在验证登录结果...")
-            await page.wait_for_url("**/clientarea.php**", timeout=30000)
-            print("\n登录成功！脚本执行完毕。")
+        # 验证登录是否成功，检查 URL 是否跳转
+        await page.wait_for_url("**/clientarea.php**", timeout=30000)
+        print("登录成功！")
 
-        except Exception as e:
-            print(f"\n脚本执行出错: {e}")
+    except Exception as e:
+        print(f"脚本执行出错: {e}")
+        # 如果 page 对象已经成功创建，就进行截图
+        if page:
             screenshot_path = "error_screenshot.png"
             print(f"正在截取错误屏幕并保存至 {screenshot_path} ...")
             await page.screenshot(path=screenshot_path)
-            # 重新抛出异常，这对于让GitHub Action识别到失败并执行后续步骤（如上传截图）至关重要
-            raise
+        # 重新抛出异常，以便 GitHub Action 将此步骤标记为失败
+        raise
 
-        finally:
-            await browser.close()
+    finally:
+        # 4. 确保关闭由 Curlwright 管理的浏览器
+        if executor:
+            await executor.close()
             print("浏览器已关闭。")
 
 if __name__ == "__main__":

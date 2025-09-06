@@ -3,7 +3,7 @@ name: Automated Login Test
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '3 3 * */30 *'
 
 jobs:
   login-and-test:

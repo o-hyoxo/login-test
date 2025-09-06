@@ -15,16 +15,14 @@ PASSWORD = ";Vud)pH!kXvU"
 SCREENSHOT_PATH = "error_screenshot.png"
 
 # --- XPaths ---
-# !! 更新: Cloudflare Turnstile 验证是在一个 iframe 中
 CLOUDFLARE_TURNSTILE_IFRAME_XPATH = "//iframe[starts-with(@src, 'https://challenges.cloudflare.com')]"
 CLOUDFLARE_INTERNAL_CHECKBOX_XPATH = "//input[@type='checkbox']"
 
-# 登录表单元素
-EMAIL_INPUT_XPATH = "/html/body/section/div/div[1]/div/form/div/div[1]/div[2]/div/input"
-PASSWORD_INPUT_XPATH = "/html/body/section/div/div[1]/div/form/div/div[1]/div[3]/div[2]/input"
+EMAIL_INPUT_XPATH = "//*[@id='inputEmail']"  # 使用 ID 定位器，更稳定
+PASSWORD_INPUT_XPATH = "//*[@id='inputPassword']" # 使用 ID 定位器，更稳定
 RECAPTCHA_IFRAME_XPATH = "//iframe[starts-with(@name, 'a-') and starts-with(@src, 'https://www.google.com/recaptcha/api2/anchor')]"
 RECAPTCHA_CHECKBOX_XPATH = '//*[@id="recaptcha-anchor"]'
-LOGIN_BUTTON_XPATH = "/html/body/section/div/div[1]/div/form/div/div[1]/div[5]/button"
+LOGIN_BUTTON_XPATH = "//*[@id='login']" # 使用 ID 定位器，更稳定
 
 def setup_driver():
     """在 GitHub Actions 环境中设置 Chrome WebDriver。"""
@@ -50,77 +48,78 @@ def take_screenshot(driver, path):
 def login():
     """执行登录网站的完整流程。"""
     driver = setup_driver()
-    # 增加等待时间以应对 Cloudflare 和 reCAPTCHA 的加载
-    wait = WebDriverWait(driver, 30)
+    # 增加总等待时间以应对不稳定的网络环境
+    wait = WebDriverWait(driver, 40)
 
     try:
         print(f"正在打开登录页面: {LOGIN_URL}")
         driver.get(LOGIN_URL)
-
-        # 步骤 1: 处理 Cloudflare Turnstile 验证 (如果出现)
+        
+        # --- 重构后的智能验证逻辑 ---
+        print("正在检查页面状态：判断是Cloudflare验证还是登录表单...")
         try:
-            print("正在检查 Cloudflare Turnstile 验证...")
-            
-            # 等待 Cloudflare iframe 加载完成
-            turnstile_iframe = wait.until(
+            # 1. 首先在15秒内尝试寻找Cloudflare iframe
+            short_wait = WebDriverWait(driver, 15)
+            turnstile_iframe = short_wait.until(
                 EC.presence_of_element_located((By.XPATH, CLOUDFLARE_TURNSTILE_IFRAME_XPATH))
             )
             
-            print("检测到 Cloudflare iframe，正在切换进入...")
+            # 2. 如果找到了，则执行Cloudflare验证流程
+            print("检测到Cloudflare验证，正在处理...")
             driver.switch_to.frame(turnstile_iframe)
             
-            # 等待并点击 iframe 内部的验证框
             turnstile_checkbox = wait.until(
                 EC.element_to_be_clickable((By.XPATH, CLOUDFLARE_INTERNAL_CHECKBOX_XPATH))
             )
-            print("正在点击 Cloudflare 验证框...")
             turnstile_checkbox.click()
+            print("已点击Cloudflare验证框。")
             
-            print("已点击验证框。切换回主页面并等待登录表单加载...")
             driver.switch_to.default_content()
             
-            # 关键步骤: 等待 Cloudflare 验证通过后，登录表单完全可见
+            # 3. 验证后，必须等待登录表单加载完成
+            print("等待登录表单加载...")
             wait.until(EC.visibility_of_element_located((By.XPATH, EMAIL_INPUT_XPATH)))
-            print("Cloudflare 验证通过，登录页面已加载。")
+            print("Cloudflare验证通过，登录表单已可见。")
 
         except TimeoutException:
-            print("未找到 Cloudflare 验证，或页面已直接加载。继续执行。")
+            # 4. 如果15秒内没找到Cloudflare iframe，则必须确认登录表单已存在
+            print("未检测到Cloudflare iframe，正在确认登录表单是否已加载...")
+            try:
+                wait.until(EC.visibility_of_element_located((By.XPATH, EMAIL_INPUT_XPATH)))
+                print("确认登录表单已直接可见，跳过Cloudflare处理步骤。")
+            except TimeoutException:
+                # 5. 如果既没找到Cloudflare也没找到登录表单，则页面卡住，抛出错误
+                raise Exception("页面加载失败：既未找到Cloudflare验证也未找到登录表单。")
 
-        # 步骤 2: 填写账户和密码
-        print("正在定位邮箱输入框...")
-        email_input = wait.until(EC.visibility_of_element_located((By.XPATH, EMAIL_INPUT_XPATH)))
-        print("正在填写邮箱...")
+        # --- 登录流程 ---
+        # 此时可以确保登录表单是可见的
+        print("开始填写登录信息...")
+        email_input = driver.find_element(By.XPATH, EMAIL_INPUT_XPATH)
         email_input.send_keys(EMAIL)
-
-        print("正在定位密码输入框...")
-        password_input = wait.until(EC.visibility_of_element_located((By.XPATH, PASSWORD_INPUT_XPATH)))
-        print("正在填写密码...")
+        
+        password_input = driver.find_element(By.XPATH, PASSWORD_INPUT_XPATH)
         password_input.send_keys(PASSWORD)
+        print("账户和密码已填写。")
         time.sleep(1)
 
-        # 步骤 3: 点击 reCAPTCHA
-        print("正在定位 reCAPTCHA iframe...")
+        print("正在处理 reCAPTCHA...")
         recaptcha_iframe = wait.until(EC.presence_of_element_located((By.XPATH, RECAPTCHA_IFRAME_XPATH)))
         driver.switch_to.frame(recaptcha_iframe)
         
-        print("正在点击 reCAPTCHA 复选框...")
         recaptcha_checkbox = wait.until(EC.element_to_be_clickable((By.XPATH, RECAPTCHA_CHECKBOX_XPATH)))
         recaptcha_checkbox.click()
         
         driver.switch_to.default_content()
-        print("已点击 reCAPTCHA，等待验证结果...")
+        print("已点击 reCAPTCHA，等待验证...")
         time.sleep(5)
 
-        # 步骤 4: 点击登录按钮
         print("正在点击登录按钮...")
         login_button = wait.until(EC.element_to_be_clickable((By.XPATH, LOGIN_BUTTON_XPATH)))
-        # 使用 JavaScript 点击以防按钮被遮挡
         driver.execute_script("arguments[0].click();", login_button)
         
-        print("已点击登录，等待页面跳转...")
-        time.sleep(10) # 等待足够长的时间以确认登录结果
+        print("已点击登录，等待页面跳转确认...")
+        time.sleep(10)
         
-        # 验证是否登录成功
         current_url = driver.current_url
         print(f"登录后当前 URL: {current_url}")
         if "login" in current_url:
@@ -131,7 +130,7 @@ def login():
     except Exception as e:
         print(f"脚本执行出错: {e}")
         take_screenshot(driver, SCREENSHOT_PATH)
-        sys.exit(1) # 退出并返回错误码，使 Action 失败
+        sys.exit(1)
     finally:
         print("关闭浏览器。")
         driver.quit()

@@ -1,6 +1,7 @@
 import os
 import time
 import sys
+import subprocess
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -21,8 +22,23 @@ LOGIN_BUTTON_ID = "login"
 RECAPTCHA_IFRAME_XPATH = "//iframe[starts-with(@name, 'a-')]"
 RECAPTCHA_CHECKBOX_XPATH = '//*[@id="recaptcha-anchor"]'
 
+def get_chrome_main_version():
+    """动态检测系统中安装的Chrome主版本号。"""
+    try:
+        # 运行shell命令获取版本信息
+        output = subprocess.check_output(['google-chrome', '--version']).decode('utf-8')
+        # 从 "Google Chrome 139.0.7258.154" 中提取 "139"
+        version_string = output.split(' ')[2]
+        major_version = int(version_string.split('.')[0])
+        print(f"成功检测到 Chrome 主版本号: {major_version}")
+        return major_version
+    except Exception as e:
+        print(f"无法自动检测 Chrome 版本: {e}")
+        print("将不指定版本号，让 undetected-chromedriver 尝试自动处理。")
+        return None
+
 def setup_driver():
-    """使用 undetected_chromedriver 设置驱动程序。"""
+    """使用 undetected_chromedriver 和动态检测的版本号来设置驱动程序。"""
     print("正在设置 undetected-chromedriver...")
     options = uc.ChromeOptions()
     options.add_argument("--headless")
@@ -30,10 +46,11 @@ def setup_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument('--window-size=1920,1080')
     
-    # 关键修改：移除 version_main 参数，让库自动检测已安装的 Chrome 版本
-    # 这大大增强了脚本在不同环境下的兼容性
-    print("自动检测已安装的Chrome版本...")
-    driver = uc.Chrome(options=options) 
+    # 动态获取主版本号
+    major_version = get_chrome_main_version()
+    
+    # 将检测到的版本号传递给驱动，确保100%匹配
+    driver = uc.Chrome(options=options, version_main=major_version)
     return driver
 
 def take_screenshot(driver, path):

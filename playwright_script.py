@@ -1,5 +1,6 @@
 import asyncio
-from curlwright import RequestExecutor
+# --- 修正后的导入语句 ---
+from curlwright.core.request_executor import RequestExecutor
 from playwright.async_api import TimeoutError
 
 async def main():

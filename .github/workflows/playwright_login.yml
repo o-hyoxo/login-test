@@ -11,10 +11,10 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4 # 建议也将 checkout action 更新到 v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5 # 建议也将 setup-python action 更新到 v5
       with:
         python-version: '3.9'
 
@@ -29,7 +29,7 @@ jobs:
 
     - name: Upload screenshot on failure
       if: failure() # 仅在上一步失败时运行
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4 # <--- 主要修改在这里，从 v3 更新到 v4
       with:
         name: error-screenshot
         path: error_screenshot.png

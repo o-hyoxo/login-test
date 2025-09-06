@@ -1,5 +1,7 @@
+import os
 import time
 import sys
+# 使用专门为反检测设计的 undetected_chromedriver
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -13,49 +15,91 @@ PASSWORD = ";Vud)pH!kXvU"
 SCREENSHOT_PATH = "error_screenshot.png"
 
 # --- 定位器 ---
+SHADOW_DOM_HOST_SELECTOR = "div#turnstile-wrapper"
 EMAIL_INPUT_ID = "inputEmail"
 PASSWORD_INPUT_ID = "inputPassword"
 LOGIN_BUTTON_ID = "login"
 RECAPTCHA_IFRAME_XPATH = "//iframe[starts-with(@name, 'a-')]"
 RECAPTCHA_CHECKBOX_XPATH = '//*[@id="recaptcha-anchor"]'
 
+def setup_driver():
+    """使用 undetected_chromedriver 设置驱动程序。"""
+    print("正在设置 undetected-chromedriver...")
+    options = uc.ChromeOptions()
+    # 在无头模式下运行，这对于 CI/CD 环境至关重要
+    # uc 在某些版本的 linux 上无头模式可能需要额外配置
+    # 如果遇到问题，可以尝试移除 --headless
+    options.add_argument("--headless") 
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument('--window-size=1920,1080')
+    
+    # version_main 会自动查找系统上安装的 Chrome 版本
+    driver = uc.Chrome(options=options, version_main=114) # 钉一个版本号以增加稳定性
+    return driver
+
 def take_screenshot(driver, path):
-    """截取屏幕截图。"""
+    """截取当前浏览器窗口的屏幕截图。"""
     print(f"错误发生，正在截取屏幕并保存至: {path}")
     driver.save_screenshot(path)
 
 def login():
-    """使用 undetected-chromedriver 执行登录流程。"""
-    driver = None
+    """执行登录网站的完整流程。"""
+    driver = setup_driver()
+    # 总超时时间设置为60秒，给uc加载和页面响应留出充足时间
+    timeout = 60
+    wait = WebDriverWait(driver, timeout)
+    
     try:
-        print("正在初始化 undetected-chromedriver...")
-        options = uc.ChromeOptions()
-        # 在 GitHub Actions (Linux) 中，必须以无头模式运行
-        options.add_argument('--headless')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        
-        # undetected-chromedriver 会自动下载并管理驱动
-        driver = uc.Chrome(options=options)
-        
-        # 设置一个较长的全局等待时间
-        wait = WebDriverWait(driver, 45)
-
         print(f"正在打开登录页面: {LOGIN_URL}")
         driver.get(LOGIN_URL)
+
+        # --- 弹性轮询逻辑 ---
+        start_time = time.time()
+        is_cloudflare_passed = False
+        print("启动轮询程序，在60秒内持续检查页面状态...")
         
-        # --- 核心逻辑 ---
-        # undetected-chromedriver 的关键优势在于它能让 Cloudflare 的挑战自动通过
-        # 我们只需耐心等待登录表单元素出现即可
-        print("页面加载中，等待 Cloudflare 自动验证通过...")
-        print("正在等待邮箱输入框变为可见状态...")
-        
-        try:
-            wait.until(EC.visibility_of_element_located((By.ID, EMAIL_INPUT_ID)))
-            print("Cloudflare 验证通过，成功加载登录表单。")
-        except TimeoutException:
-            # 如果超时后仍然没有出现登录表单，说明页面卡死
-            raise Exception("等待超时：Cloudflare 验证未能自动完成，无法加载登录表单。")
+        while time.time() - start_time < timeout:
+            # 1. 优先检查登录表单是否已可见
+            try:
+                driver.find_element(By.ID, EMAIL_INPUT_ID)
+                print("检测到登录表单，Cloudflare 验证已通过或不存在。")
+                is_cloudflare_passed = True
+                break
+            except:
+                pass # 没找到登录表单，继续检查下一个
+
+            # 2. 检查 Cloudflare Shadow DOM 宿主是否存在
+            try:
+                shadow_host = driver.find_element(By.CSS_SELECTOR, SHADOW_DOM_HOST_SELECTOR)
+                print("检测到 Cloudflare 验证，正在尝试点击...")
+                
+                # 使用JS穿透Shadow DOM获取iframe
+                js_script = "return arguments[0].shadowRoot.querySelector('iframe');"
+                turnstile_iframe = driver.execute_script(js_script, shadow_host)
+                
+                # 切换到iframe并点击
+                driver.switch_to.frame(turnstile_iframe)
+                checkbox = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, "//input[@type='checkbox']"))
+                )
+                checkbox.click()
+                print("已点击 Cloudflare 验证框。")
+                driver.switch_to.default_content() # 切回主页面
+                
+                # 点击后，等待登录表单出现
+                wait.until(EC.visibility_of_element_located((By.ID, EMAIL_INPUT_ID)))
+                print("Cloudflare 验证成功，登录表单已加载。")
+                is_cloudflare_passed = True
+                break
+            except:
+                pass # 没找到Cloudflare，继续轮询
+
+            time.sleep(2) # 每2秒检查一次
+
+        # 如果循环结束仍未通过Cloudflare，则判定失败
+        if not is_cloudflare_passed:
+            raise Exception("超时！在60秒内既未找到登录表单，也未能成功处理Cloudflare验证。")
 
         # --- 登录流程 ---
         print("开始填写登录信息...")
@@ -78,7 +122,7 @@ def login():
         driver.find_element(By.ID, LOGIN_BUTTON_ID).click()
         
         print("已点击登录，等待页面跳转确认...")
-        time.sleep(10) # 等待跳转
+        time.sleep(10)
         
         current_url = driver.current_url
         print(f"登录后当前 URL: {current_url}")
@@ -89,13 +133,11 @@ def login():
 
     except Exception as e:
         print(f"脚本执行出错: {e}")
-        if driver:
-            take_screenshot(driver, SCREENSHOT_PATH)
+        take_screenshot(driver, SCREENSHOT_PATH)
         sys.exit(1)
     finally:
-        if driver:
-            print("关闭浏览器。")
-            driver.quit()
+        print("关闭浏览器。")
+        driver.quit()
 
 if __name__ == "__main__":
     login()

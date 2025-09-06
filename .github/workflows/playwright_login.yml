@@ -24,12 +24,6 @@ jobs:
         pip install playwright
         python -m playwright install --with-deps chromium
 
-    - name: 创建WARP网络
-      uses: fscarmen/warp-on-actions@v1.3
-      with:
-          stack: dual        # Optional. Support [ ipv4, ipv6, dual ]. Default is dual.
-          mode: client    # Optional. Support [ wireguard, client ]. Default is wireguard.
-
     - name: Run Playwright script
       run: python playwright_script.py
 

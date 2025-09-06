@@ -1,62 +1,82 @@
-# 工作流程名称
 name: Automated Login Test
 
-# 工作流程触发器
 on:
-  # 允许手动从 Actions 标签页触发此工作流程
   workflow_dispatch:
-  # 也可以在推送到 main 分支时自动触发
-  # push:
-  #   branches: [ main ]
-  # 定时触发 (例如，每天UTC时间凌晨2点运行一次)
   schedule:
     - cron: '0 2 * * *'
 
-# 定义一个或多个作业
 jobs:
   login-and-test:
-    # 指定运行器环境
     runs-on: ubuntu-latest
 
-    # 作业步骤
     steps:
-      # 步骤 1: 检出仓库代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 步骤 2: 设置 Python 环境
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10' # 可以指定你需要的 Python 版本
+          python-version: '3.11' # 推荐使用较新的 Python 版本
 
-      # 步骤 3: 安装 Google Chrome 浏览器
-      - name: Install Google Chrome
+      # 关键步骤：安装完整的浏览器环境和依赖
+      - name: Install System Dependencies and Google Chrome
         run: |
           sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
+          sudo apt-get install -y \
+            gconf-service \
+            libasound2 \
+            libatk1.0-0 \
+            libc6 \
+            libcairo2 \
+            libcups2 \
+            libdbus-1-3 \
+            libexpat1 \
+            libfontconfig1 \
+            libgcc1 \
+            libgconf-2-4 \
+            libgdk-pixbuf2.0-0 \
+            libglib2.0-0 \
+            libgtk-3-0 \
+            libnspr4 \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libstdc++6 \
+            libx11-6 \
+            libx11-xcb1 \
+            libxcb1 \
+            libxcomposite1 \
+            libxcursor1 \
+            libxdamage1 \
+            libxext6 \
+            libxfixes3 \
+            libxi6 \
+            libxrandr2 \
+            libxrender1 \
+            libxss1 \
+            libxtst6 \
+            ca-certificates \
+            fonts-liberation \
+            libappindicator1 \
+            libnss3 \
+            lsb-release \
+            xdg-utils \
+            wget \
+            google-chrome-stable
 
-      # 步骤 4: 安装 Python 依赖
-      - name: Install dependencies
+      # 更新 pip 并安装新的 Python 库
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install selenium webdriver-manager
+          pip install undetected-chromedriver selenium
 
-      - name: 创建WARP网络
-        uses: fscarmen/warp-on-actions@v1.3
-        with:
-          stack: dual        # Optional. Support [ ipv4, ipv6, dual ]. Default is dual.
-          mode: client    # Optional. Support [ wireguard, client ]. Default is wireguard.
-          
-      # 步骤 5: 运行登录脚本
+      # 运行使用新库的 Python 脚本
       - name: Run Login Script
         run: python login_script.py
 
-      # 步骤 6: 如果脚本失败，上传错误截图
-      # `if: failure()` 确保此步骤仅在之前的步骤失败时运行
+      # 失败时上传截图
       - name: Upload screenshot on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: error-screenshot # 上传的工件名称
-          path: error_screenshot.png # 要上传的文件路径
+          name: error-screenshot
+          path: error_screenshot.png
